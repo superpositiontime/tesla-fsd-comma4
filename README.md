@@ -16,6 +16,137 @@ No extra hardware needed. If your comma 4 is already working in your Tesla, this
 
 ---
 
+## 💰 Subscriptions & Cost Breakdown
+
+> **TL;DR: No subscriptions required. This mod bypasses Tesla's FSD paywall entirely.**
+
+| Item | Cost | Required? | Notes |
+|------|------|-----------|-------|
+| **Tesla FSD Supervised** | $99/mo or $8,000 one-time | ❌ **NO** | The whole point of this mod — the CAN injection tricks the car into activating FSD without a subscription |
+| **Tesla Enhanced Autopilot** | $99/mo | ❌ **NO** | Not needed — FSD is activated directly via CAN bus |
+| **Tesla Premium Connectivity** | $9.99/mo | ❌ **NO** | Only needed for Tesla streaming/satellite view — not related to driving |
+| **Comma Prime** | $24/mo | ❌ **Optional** | Gives you cloud dashcam, remote SSH, and analytics — nice to have but not required for this mod |
+| **comma 4 device** | ~$999 | ✅ One-time | The hardware that runs openpilot and hosts the CAN mod |
+| **Tesla-compatible harness** | ~$50–100 | ✅ One-time | OBD-C harness specific to your Tesla model (from comma shop) |
+
+**Total cost: ~$999–$1,100 one-time, $0/month recurring**
+
+---
+
+## 🎯 Prerequisites
+
+Before you start, make sure you have:
+
+- [ ] **comma 4** — purchased from [comma.ai/shop](https://comma.ai/shop)
+- [ ] **Tesla-compatible harness** — the OBD-C cable for your specific Tesla model from the comma shop
+- [ ] **2026 Tesla Model Y Juniper** with **HW4 or HW4.5** (firmware ≥ 2026.2.3)
+- [ ] **openpilot already installed and working** — do NOT attempt the FSD mod until basic comma driving works
+- [ ] **SSH access** to your comma device (via comma connect app or local WiFi)
+- [ ] **Phone on the same WiFi** as the comma (for the toggle web UI)
+
+---
+
+## 📋 Step-by-Step Setup
+
+### Step 1: Install the comma 4 hardware
+
+1. Mount the comma 4 on your windshield using the included mount
+2. Connect the OBD-C harness between the comma 4 and your Tesla's ADAS camera connector (behind the rearview mirror)
+3. Power on the comma — it should boot to the openpilot setup screen
+4. Follow comma's on-screen setup (WiFi, software update, etc.)
+
+> 📖 Full hardware guide: [comma.ai/setup](https://comma.ai/setup)
+
+### Step 2: Verify openpilot works first
+
+**Do NOT skip this step.** Before touching the FSD mod:
+
+1. Drive with openpilot in your Tesla and confirm it steers, accelerates, and brakes normally
+2. Make sure the comma 4 screen shows the driving view with lane lines
+3. Test for at least a few drives to confirm stability
+
+If openpilot doesn't work, the FSD mod won't either — they share the same panda CAN interface.
+
+### Step 3: SSH into the comma
+
+From your computer (same WiFi as the comma):
+
+```bash
+ssh comma@comma.local
+# Default has no password — uses key-based auth via comma connect
+```
+
+Or use the IP address shown in the comma's settings menu:
+
+```bash
+ssh comma@192.168.1.XX
+```
+
+### Step 4: Download the scripts
+
+```bash
+# FSD CAN mod script
+curl -o /data/tesla_fsd_comma4.py \
+  https://raw.githubusercontent.com/superpositiontime/tesla-fsd-comma4/main/tesla_fsd_comma4.py
+
+# Mode toggle web server
+curl -o /data/fsd_toggle_server.py \
+  https://raw.githubusercontent.com/superpositiontime/tesla-fsd-comma4/main/fsd_toggle_server.py
+```
+
+### Step 5: Test in dummy mode (no car needed)
+
+Test the script logic at home without being in the car:
+
+```bash
+# Edit the script
+nano /data/tesla_fsd_comma4.py
+```
+
+Set at the top of the file:
+```python
+DUMMY_MODE = True    # generates fake CAN frames for testing
+TRANSMIT   = False   # don't try to send anything
+```
+
+Run it:
+```bash
+python3 /data/tesla_fsd_comma4.py
+```
+
+You should see simulated CAN frame processing in the terminal. If it runs without errors, you're good.
+
+### Step 6: Start the toggle server
+
+```bash
+python3 /data/fsd_toggle_server.py &
+```
+
+This starts the web UI on port 8088.
+
+### Step 7: Toggle between modes from your phone
+
+1. Open your phone browser
+2. Go to `http://<comma-ip>:8088` (e.g., `http://192.168.1.42:8088`)
+3. You'll see the current mode and a big toggle button
+4. Tap to switch:
+   - **→ Tesla FSD:** Stops openpilot → starts the CAN mod → Tesla drives
+   - **→ openpilot:** Stops the CAN mod → restarts openpilot → Comma drives
+5. Wait ~5–10 seconds for the transition to complete
+
+### Step 8: Auto-start on boot (optional)
+
+To have the toggle server start automatically when the comma boots:
+
+```bash
+echo 'python3 /data/fsd_toggle_server.py &' >> /data/rc.local
+chmod +x /data/rc.local
+```
+
+Now every time the comma powers on, the toggle UI will be available at port 8088.
+
+---
+
 ## 🧠 How It Works — Architecture
 
 > **Only one system drives at a time.** This mod switches between two completely separate driving brains.
@@ -100,99 +231,6 @@ The web toggle (`fsd_toggle_server.py`) serves a mobile-friendly page on port 80
 
 ---
 
-## 🎯 Requirements
-
-| Requirement | Detail |
-|---|---|
-| Hardware | comma 4 (with panda built in) |
-| Vehicle | Tesla Model Y Juniper 2026 (HW4, firmware ≥ 2026.2.3) |
-| openpilot | Already installed and working |
-| Connection | SSH access to the comma (via comma connect or local WiFi) |
-
----
-
-## ⚡ Quick Install
-
-SSH into your comma and run:
-
-```bash
-# FSD mod script
-curl -o /data/tesla_fsd_comma4.py \
-  https://raw.githubusercontent.com/superpositiontime/tesla-fsd-comma4/main/tesla_fsd_comma4.py
-
-# Mode toggle server (web UI)
-curl -o /data/fsd_toggle_server.py \
-  https://raw.githubusercontent.com/superpositiontime/tesla-fsd-comma4/main/fsd_toggle_server.py
-```
-
----
-
-## 📱 Web Toggle UI
-
-Switch between FSD and openpilot from your phone — no SSH needed after setup.
-
-**Start the toggle server:**
-
-```bash
-python3 /data/fsd_toggle_server.py
-```
-
-Then open **`http://<comma-ip>:8088`** in your phone browser (same WiFi).
-
-The UI shows:
-- **Current mode** — which system is active (openpilot or Tesla FSD)
-- **Live CAN bus log** — real-time frame modifications scrolling
-- **One big button** — tap to switch modes (~5–10 second transition)
-- **Status cards** — panda connection, transmit state, speed profile, uptime
-
-**To auto-start on boot**, add to `/data/rc.local`:
-
-```bash
-python3 /data/fsd_toggle_server.py &
-```
-
----
-
-## 🚀 Usage
-
-### Option A — Monitor only (openpilot keeps driving)
-
-```bash
-ssh comma@comma.local
-python3 /data/tesla_fsd_comma4.py
-```
-
-With default settings (`TRANSMIT = False`), the script listens and shows status on the HUD without interfering with openpilot.
-
-### Option B — Full mod (openpilot paused)
-
-Edit the top of the script:
-```python
-TRANSMIT = True   # enable CAN frame injection
-```
-
-Then:
-```bash
-sudo systemctl stop openpilot
-python3 /data/tesla_fsd_comma4.py
-# When done:
-sudo systemctl start openpilot
-```
-
-### Option C — Dummy mode (no car needed)
-
-```python
-DUMMY_MODE = True   # generates synthetic Tesla CAN frames
-```
-
-```bash
-python3 /data/tesla_fsd_comma4.py
-```
-
-Useful for testing the script logic at home before getting in the car.
-
----
-
 ## ⚙️ Configuration
 
 Edit the top of `tesla_fsd_comma4.py`:
@@ -233,6 +271,31 @@ This is a Python translation of the `HW4Handler` from the original CanFeather Ar
    - **Mux 2** → injects speed profile into byte 7 bits [6:4]
 
 3. **Retransmits** the modified frames back onto the bus via panda's `SAFETY_ALLOUTPUT` mode
+
+---
+
+## ❓ FAQ
+
+**Q: Do I need a Tesla FSD subscription?**
+A: No. The entire point of this mod is to activate FSD via CAN bus injection, bypassing Tesla's subscription check.
+
+**Q: Does this work on HW3 vehicles?**
+A: No. This port targets HW4/HW4.5 only (2024+ Model Y Juniper). The original [CanFeather project](https://gitlab.com/Starmixcraft/tesla-fsd-can-mod) has HW3 support if you need it.
+
+**Q: Can Tesla patch this via OTA update?**
+A: Potentially yes. Tesla could change the CAN frame IDs or add authentication. If that happens, the frame IDs in the script would need to be updated.
+
+**Q: Will this void my Tesla warranty?**
+A: Using a comma device involves modifying the ADAS camera connection and injecting CAN bus frames. This could void warranty on ADAS-related components. Use at your own risk.
+
+**Q: Can I run FSD and openpilot at the same time?**
+A: No. Only one system drives at a time. The toggle switches between them — it stops one before starting the other.
+
+**Q: What if I don't have WiFi in my car?**
+A: The comma 4 creates its own WiFi hotspot. Connect your phone to it to access the toggle UI. Alternatively, you can use comma connect's built-in SSH.
+
+**Q: Is this legal?**
+A: Modifying your own vehicle's CAN bus is a gray area. It's your car and your device, but Tesla's terms of service may prohibit it. This project is for educational purposes.
 
 ---
 
