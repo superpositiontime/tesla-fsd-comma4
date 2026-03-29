@@ -6,9 +6,85 @@
 [![HW Version](https://img.shields.io/badge/autopilot-HW4-orange)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
 
+<p align="center">
+  <img src="https://www.comma.ai/_app/immutable/assets/four_screen_on.WrrTderw.png" alt="comma four" width="420" />
+</p>
+
 A Python port of [Starmixcraft's Tesla FSD CAN Mod](https://gitlab.com/Starmixcraft/tesla-fsd-can-mod) — adapted to run directly on the **comma 4** via its built-in panda CAN interface.
 
 No extra hardware needed. If your comma 4 is already working in your Tesla, this is purely a software mod.
+
+---
+
+## 🧠 How It Works — Architecture
+
+> **Only one system drives at a time.** This mod switches between two completely separate driving brains.
+
+### Mode A: openpilot (Comma drives the car)
+
+```
+┌─────────────────────────────────────────────────────┐
+│  COMMA 4 DEVICE                                     │
+│  ┌───────────┐  ┌──────────┐  ┌──────────────────┐  │
+│  │ Cameras   │→ │ AI Model │→ │ Steering / Accel │  │
+│  │ (onboard) │  │(openpilot│  │  via Panda CAN   │  │
+│  └───────────┘  └──────────┘  └──────────────────┘  │
+│                                                     │
+│  Tesla FSD: OFF (bypassed)                          │
+│  FSD CAN script: NOT RUNNING                        │
+└─────────────────────────────────────────────────────┘
+```
+
+- The Comma 4 uses its own cameras + AI model to drive
+- openpilot controls steering, gas, and braking through the panda CAN interface
+- Tesla's FSD computer is completely bypassed
+- The Comma's 1.9" OLED shows the openpilot driving view
+
+### Mode B: Tesla FSD (Tesla drives the car)
+
+```
+┌─────────────────────────────────────────────────────┐
+│  TESLA HW4 COMPUTER (built into the car)            │
+│  ┌───────────┐  ┌──────────┐  ┌──────────────────┐  │
+│  │ Tesla     │→ │ Tesla NN │→ │ Steering / Accel │  │
+│  │ Cameras   │  │ (FSD)    │  │  (native)        │  │
+│  └───────────┘  └──────────┘  └──────────────────┘  │
+│                                                     │
+│  COMMA 4: openpilot STOPPED                         │
+│  Comma's role: CAN tool only                        │
+│  ┌──────────────────────────────────────────────┐   │
+│  │ tesla_fsd_comma4.py running via panda:       │   │
+│  │  • Flip FSD-enabled bit (0x3FD mux 0)        │   │
+│  │  • Suppress nag warnings (0x3FD mux 1)       │   │
+│  │  • Inject speed profile (0x3FD mux 2)        │   │
+│  └──────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────┘
+```
+
+- openpilot is **stopped** — the Comma does **not** drive
+- Tesla's own HW4 computer + cameras + neural net handles everything
+- The Comma 4's panda is used **only** as a CAN bus tool to:
+  - Enable FSD without a subscription (bit injection on `0x3FD`)
+  - Suppress "hands on wheel" nag warnings
+  - Map follow distance to speed profiles (Chill / Normal / Sport)
+
+### The Toggle (Phone Web UI)
+
+```
+        Phone browser → http://<comma-ip>:8088
+                    ┌─────────────┐
+     ┌──────────────│  SWITCH TO  │──────────────┐
+     │              │    FSD      │              │
+     ▼              └─────────────┘              ▼
+ ┌────────┐     stops openpilot service     ┌────────┐
+ │ COMMA  │ ──────────────────────────────→ │  FSD   │
+ │  MODE  │     starts CAN mod script       │  MODE  │
+ │        │ ←────────────────────────────── │        │
+ └────────┘     stops CAN mod script        └────────┘
+                starts openpilot service
+```
+
+The web toggle (`fsd_toggle_server.py`) serves a mobile-friendly page on port 8088. One tap switches modes. The transition takes ~5–10 seconds.
 
 ---
 
@@ -20,6 +96,7 @@ No extra hardware needed. If your comma 4 is already working in your Tesla, this
 - **HUD status display** — shows live mod status on the comma screen via openpilot's cereal bus
 - **Dummy / offline test mode** — generates synthetic CAN frames so you can test at home without the car
 - **Monitor-only mode** — run alongside openpilot without interrupting its driving (`TRANSMIT = False`)
+- **Phone toggle UI** — switch between FSD and openpilot from your phone browser
 
 ---
 
@@ -62,7 +139,11 @@ python3 /data/fsd_toggle_server.py
 
 Then open **`http://<comma-ip>:8088`** in your phone browser (same WiFi).
 
-The UI shows current mode, live log output, and a single big button to switch. Switching takes ~5–10 seconds (stops one service, starts the other).
+The UI shows:
+- **Current mode** — which system is active (openpilot or Tesla FSD)
+- **Live CAN bus log** — real-time frame modifications scrolling
+- **One big button** — tap to switch modes (~5–10 second transition)
+- **Status cards** — panda connection, transmit state, speed profile, uptime
 
 **To auto-start on boot**, add to `/data/rc.local`:
 
@@ -118,7 +199,7 @@ Edit the top of `tesla_fsd_comma4.py`:
 
 ```python
 DUMMY_MODE      = False   # True = offline test with fake CAN frames
-TRANSMIT        = True    # True = modify & retransmit frames (requires ALLOUTPUT safety)
+TRANSMIT        = True    # True = modify & retransmit frames (requires ALLOUTPUT)
 SHOW_ON_SCREEN  = True    # True = publish status to openpilot HUD via cereal
 CAN_BUS         = 2       # Autopilot bus (try 0 or 1 if you see zero frames)
 LOG_FRAMES      = True    # Print frame activity to terminal
@@ -138,7 +219,7 @@ State changes also trigger a brief `userFlag` pulse in the openpilot HUD.
 
 ---
 
-## 🔧 How It Works
+## 🔧 CAN Bus Details
 
 This is a Python translation of the `HW4Handler` from the original CanFeather Arduino project. It:
 
